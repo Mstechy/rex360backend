@@ -168,4 +168,10 @@ app.get('/api/slides', async (req, res) => {
     res.json(data);
 });
 
-app.listen(PORT, () => console.log(`🔒 Secure Server running on Port ${PORT}`));
+// Start the server ONLY if we are running locally (not on Vercel)
+if (require.main === module) {
+    app.listen(PORT, () => console.log(`🔒 Secure Server running on Port ${PORT}`));
+}
+
+// Export the app for Vercel (CRITICAL STEP)
+module.exports = app;
