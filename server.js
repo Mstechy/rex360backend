@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 5000;
 // --- 1. CONNECT TO SUPABASE ---
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// --- 2. SECURITY MIDDLEWARE (The Shield) ---
+// --- 2. SECURITY MIDDLEWARE ---
 
 // A. Set Secure HTTP Headers
 app.use(helmet());
@@ -42,24 +42,9 @@ app.use(sanitizeInputs);
 // C. Prevent Parameter Pollution
 app.use(hpp());
 
-// D. Strict CORS (Only allow YOUR website to talk to this server)
-const allowedOrigins = [
-  'http://localhost:5173',                 // Localhost
-  'https://rex360-frontend.vercel.app'     // YOUR LIVE WEBSITE
-];
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or server-to-server)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
-  credentials: true
-}));
+// D. UNIVERSAL CORS (The Fix for Mobile)
+// This allows ANY website (including your phone) to talk to the server.
+app.use(cors());
 
 // E. Rate Limiting
 const limiter = rateLimit({
