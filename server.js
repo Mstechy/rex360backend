@@ -14,6 +14,28 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
+// --- SECURITY MIDDLEWARE ---
+// This checks the Supabase Token sent from your Frontend Login
+const verifyAdmin = async (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) return res.status(401).json({ error: "No token provided" });
+
+        const token = authHeader.split(' ')[1];
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+
+        // Security Check: Only allow your specific admin email
+        if (error || !user || user.email !== 'rex360solutions@gmail.com') {
+            return res.status(403).json({ error: "Unauthorized: Admin access required" });
+        }
+
+        req.user = user;
+        next();
+    } catch (err) {
+        res.status(401).json({ error: "Invalid session" });
+    }
+};
+
 async function uploadToSupabase(file) {
     const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, '_');
     const fileName = `${Date.now()}_${cleanName}`;
@@ -25,25 +47,23 @@ async function uploadToSupabase(file) {
 
 // --- ROUTES ---
 
-// 1. Health Check
-app.get('/', (req, res) => res.json({ status: "Online", message: "REX360 Backend is running!" }));
+app.get('/', (req, res) => res.json({ status: "Online", message: "REX360 Backend Secure" }));
 
 // --- BLOG ROUTES ---
-// Get ALL Posts
 app.get('/api/posts', async (req, res) => {
     const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
 });
 
-// ✅ THIS IS THE MISSING PIECE (Fixes the 404 Error)
 app.get('/api/posts/:id', async (req, res) => {
     const { data, error } = await supabase.from('posts').select('*').eq('id', req.params.id).single();
     if (error) return res.status(404).json({ error: "Post not found" });
     res.json(data);
 });
 
-app.post('/api/posts', upload.single('media'), async (req, res) => {
+// SECURED: Only admin can create posts
+app.post('/api/posts', verifyAdmin, upload.single('media'), async (req, res) => {
     try {
         let mediaUrl = null;
         if (req.file) {
@@ -65,7 +85,8 @@ app.post('/api/posts', upload.single('media'), async (req, res) => {
     }
 });
 
-app.delete('/api/posts/:id', async (req, res) => {
+// SECURED: Only admin can delete posts
+app.delete('/api/posts/:id', verifyAdmin, async (req, res) => {
     const { error } = await supabase.from('posts').delete().eq('id', req.params.id);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ message: "Deleted successfully" });
@@ -78,14 +99,14 @@ app.get('/api/slides', async (req, res) => {
     res.json(data);
 });
 
-app.post('/api/slides', upload.single('image'), async (req, res) => {
+// SECURED: Only admin can change slider images
+app.post('/api/slides', verifyAdmin, upload.single('image'), async (req, res) => {
     try {
         let imageUrl = null;
         if (req.file) {
             const result = await uploadToSupabase(req.file);
             imageUrl = result.original;
         }
-        // Force 'hero' section so it appears on the Home Page slider
         const newSlide = {
             section: req.body.section || 'hero', 
             type: 'image',
@@ -99,20 +120,15 @@ app.post('/api/slides', upload.single('image'), async (req, res) => {
     }
 });
 
-app.delete('/api/slides/:id', async (req, res) => {
-    const { error } = await supabase.from('slides').delete().eq('id', req.params.id);
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ message: "Deleted successfully" });
-});
-
-// --- SERVICES ROUTES (For Manage Prices) ---
+// --- SERVICES ROUTES ---
 app.get('/api/services', async (req, res) => {
     const { data, error } = await supabase.from('services').select('*').order('id', { ascending: true });
     if (error) return res.json([]);
     res.json(data);
 });
 
-app.put('/api/services/:id', async (req, res) => {
+// SECURED: Only admin can update prices
+app.put('/api/services/:id', verifyAdmin, async (req, res) => {
     const { error } = await supabase.from('services').update(req.body).eq('id', req.params.id);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ message: "Updated successfully" });
