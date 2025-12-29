@@ -28,10 +28,18 @@ async function uploadToSupabase(file) {
 // 1. Health Check
 app.get('/', (req, res) => res.json({ status: "Online", message: "REX360 Backend is running!" }));
 
-// 2. ADMIN: NEWS & BLOG
+// --- BLOG ROUTES ---
+// Get ALL Posts
 app.get('/api/posts', async (req, res) => {
     const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+// ✅ THIS IS THE MISSING PIECE (Fixes the 404 Error)
+app.get('/api/posts/:id', async (req, res) => {
+    const { data, error } = await supabase.from('posts').select('*').eq('id', req.params.id).single();
+    if (error) return res.status(404).json({ error: "Post not found" });
     res.json(data);
 });
 
@@ -63,7 +71,7 @@ app.delete('/api/posts/:id', async (req, res) => {
     res.json({ message: "Deleted successfully" });
 });
 
-// 3. ADMIN: HOME PAGE SLIDER & CONTENT
+// --- SLIDER ROUTES ---
 app.get('/api/slides', async (req, res) => {
     const { data, error } = await supabase.from('slides').select('*').order('created_at', { ascending: true });
     if (error) return res.json([]);
@@ -77,8 +85,9 @@ app.post('/api/slides', upload.single('image'), async (req, res) => {
             const result = await uploadToSupabase(req.file);
             imageUrl = result.original;
         }
+        // Force 'hero' section so it appears on the Home Page slider
         const newSlide = {
-            section: req.body.section,
+            section: req.body.section || 'hero', 
             type: 'image',
             image_url: imageUrl
         };
@@ -96,7 +105,7 @@ app.delete('/api/slides/:id', async (req, res) => {
     res.json({ message: "Deleted successfully" });
 });
 
-// 4. ADMIN: MANAGE PRICES (This fixes the Loading Screen!)
+// --- SERVICES ROUTES (For Manage Prices) ---
 app.get('/api/services', async (req, res) => {
     const { data, error } = await supabase.from('services').select('*').order('id', { ascending: true });
     if (error) return res.json([]);
