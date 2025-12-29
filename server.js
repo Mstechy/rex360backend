@@ -7,65 +7,34 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// --- 1. MIDDLEWARE (The Security Guard) ---
-// This allows your frontend (Vercel) to talk to this backend
 app.use(cors());
 app.use(express.json());
 
-// --- 2. SUPABASE CONNECTION ---
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-
-// Setup Memory Storage for Uploads
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// Helper: Upload to Supabase
 async function uploadToSupabase(file) {
     const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, '_');
     const fileName = `${Date.now()}_${cleanName}`;
-    
-    const { error } = await supabase.storage
-        .from('uploads')
-        .upload(fileName, file.buffer, { contentType: file.mimetype });
-
+    const { error } = await supabase.storage.from('uploads').upload(fileName, file.buffer, { contentType: file.mimetype });
     if (error) throw error;
-
     const { data } = supabase.storage.from('uploads').getPublicUrl(fileName);
     return { original: data.publicUrl };
 }
 
-// --- 3. ROUTES ---
+// --- ROUTES ---
 
-// ✅ Root Route (Health Check)
-app.get('/', (req, res) => {
-    res.json({ status: "Online", message: "REX360 Backend is running!" });
-});
+// 1. Health Check
+app.get('/', (req, res) => res.json({ status: "Online", message: "REX360 Backend is running!" }));
 
-// ✅ GET Slides (THIS WAS MISSING BEFORE!)
-app.get('/api/slides', async (req, res) => {
-    try {
-        // Try to get slides. If the table is empty or missing, return an empty list []
-        const { data, error } = await supabase.from('slides').select('*');
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        console.error("Slides Error:", err.message);
-        res.json([]); // Return empty list to keep the site alive
-    }
-});
-
-// ✅ GET Posts
+// 2. ADMIN: NEWS & BLOG
 app.get('/api/posts', async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
-        if (error) throw error;
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
 });
 
-// ✅ CREATE Post
 app.post('/api/posts', upload.single('media'), async (req, res) => {
     try {
         let mediaUrl = null;
@@ -73,7 +42,6 @@ app.post('/api/posts', upload.single('media'), async (req, res) => {
             const result = await uploadToSupabase(req.file);
             mediaUrl = result.original;
         }
-
         const newPost = {
             title: req.body.title,
             excerpt: req.body.excerpt,
@@ -81,7 +49,6 @@ app.post('/api/posts', upload.single('media'), async (req, res) => {
             media_type: req.file?.mimetype.startsWith('video') ? 'video' : 'image',
             media_url: mediaUrl
         };
-
         const { data, error } = await supabase.from('posts').insert([newPost]).select();
         if (error) throw error;
         res.json(data[0]);
@@ -90,7 +57,58 @@ app.post('/api/posts', upload.single('media'), async (req, res) => {
     }
 });
 
-// --- 4. START SERVER ---
+app.delete('/api/posts/:id', async (req, res) => {
+    const { error } = await supabase.from('posts').delete().eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ message: "Deleted successfully" });
+});
+
+// 3. ADMIN: HOME PAGE SLIDER & CONTENT
+app.get('/api/slides', async (req, res) => {
+    const { data, error } = await supabase.from('slides').select('*').order('created_at', { ascending: true });
+    if (error) return res.json([]);
+    res.json(data);
+});
+
+app.post('/api/slides', upload.single('image'), async (req, res) => {
+    try {
+        let imageUrl = null;
+        if (req.file) {
+            const result = await uploadToSupabase(req.file);
+            imageUrl = result.original;
+        }
+        const newSlide = {
+            section: req.body.section,
+            type: 'image',
+            image_url: imageUrl
+        };
+        const { data, error } = await supabase.from('slides').insert([newSlide]).select();
+        if (error) throw error;
+        res.json(data[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/slides/:id', async (req, res) => {
+    const { error } = await supabase.from('slides').delete().eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ message: "Deleted successfully" });
+});
+
+// 4. ADMIN: MANAGE PRICES (This fixes the Loading Screen!)
+app.get('/api/services', async (req, res) => {
+    const { data, error } = await supabase.from('services').select('*').order('id', { ascending: true });
+    if (error) return res.json([]);
+    res.json(data);
+});
+
+app.put('/api/services/:id', async (req, res) => {
+    const { error } = await supabase.from('services').update(req.body).eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ message: "Updated successfully" });
+});
+
 if (require.main === module) {
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }
