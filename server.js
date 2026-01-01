@@ -7,7 +7,12 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+// FIX: Updated CORS to explicitly allow Authorization headers for DELETE requests
+app.use(cors({
+  origin: "*", 
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(express.json());
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -109,7 +114,7 @@ app.post('/api/slides', verifyAdmin, upload.single('image'), async (req, res) =>
     }
 });
 
-// FIXED: This specific route was missing, causing your 404 error
+// FIXED: Handles the DELETE request for slides
 app.delete('/api/slides/:id', verifyAdmin, async (req, res) => {
     try {
         const { id } = req.params;
