@@ -15,7 +15,6 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // --- SECURITY MIDDLEWARE ---
-// This checks the Supabase Token sent from your Frontend Login
 const verifyAdmin = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
@@ -24,7 +23,6 @@ const verifyAdmin = async (req, res, next) => {
         const token = authHeader.split(' ')[1];
         const { data: { user }, error } = await supabase.auth.getUser(token);
 
-        // Security Check: Only allow your specific admin email
         if (error || !user || user.email !== 'rex360solutions@gmail.com') {
             return res.status(403).json({ error: "Unauthorized: Admin access required" });
         }
@@ -56,13 +54,6 @@ app.get('/api/posts', async (req, res) => {
     res.json(data);
 });
 
-app.get('/api/posts/:id', async (req, res) => {
-    const { data, error } = await supabase.from('posts').select('*').eq('id', req.params.id).single();
-    if (error) return res.status(404).json({ error: "Post not found" });
-    res.json(data);
-});
-
-// SECURED: Only admin can create posts
 app.post('/api/posts', verifyAdmin, upload.single('media'), async (req, res) => {
     try {
         let mediaUrl = null;
@@ -85,7 +76,6 @@ app.post('/api/posts', verifyAdmin, upload.single('media'), async (req, res) => 
     }
 });
 
-// SECURED: Only admin can delete posts
 app.delete('/api/posts/:id', verifyAdmin, async (req, res) => {
     const { error } = await supabase.from('posts').delete().eq('id', req.params.id);
     if (error) return res.status(500).json({ error: error.message });
@@ -99,7 +89,6 @@ app.get('/api/slides', async (req, res) => {
     res.json(data);
 });
 
-// SECURED: Only admin can change slider images
 app.post('/api/slides', verifyAdmin, upload.single('image'), async (req, res) => {
     try {
         let imageUrl = null;
@@ -120,6 +109,18 @@ app.post('/api/slides', verifyAdmin, upload.single('image'), async (req, res) =>
     }
 });
 
+// FIXED: This specific route was missing, causing your 404 error
+app.delete('/api/slides/:id', verifyAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { error } = await supabase.from('slides').delete().eq('id', id);
+        if (error) throw error;
+        res.json({ message: "Slide removed successfully" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- SERVICES ROUTES ---
 app.get('/api/services', async (req, res) => {
     const { data, error } = await supabase.from('services').select('*').order('id', { ascending: true });
@@ -127,7 +128,6 @@ app.get('/api/services', async (req, res) => {
     res.json(data);
 });
 
-// SECURED: Only admin can update prices
 app.put('/api/services/:id', verifyAdmin, async (req, res) => {
     const { error } = await supabase.from('services').update(req.body).eq('id', req.params.id);
     if (error) return res.status(500).json({ error: error.message });
