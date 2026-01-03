@@ -8,10 +8,8 @@ const nodemailer = require('nodemailer');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
 // --- PRO-MEASURE: DYNAMIC CORS ARCHITECTURE ---
-// This list covers every possible way a user hits your site
 const allowedOrigins = [
   'https://rex360solutions.com',
   'https://www.rex360solutions.com',
@@ -22,13 +20,10 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
-    
     if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
       callback(null, true);
     } else {
-      console.error(`[CORS REJECTED]: ${origin}`);
       callback(new Error('CORS Policy Violation'));
     }
   },
@@ -37,7 +32,7 @@ app.use(cors({
   credentials: true
 }));
 
-// Handle Preflight OPTIONS requests globally
+// Handle Preflight OPTIONS for Vercel
 app.options('*', cors());
 
 app.use(express.json());
@@ -49,7 +44,6 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 } 
 });
 
-// --- ELITE EMAIL AUTOMATION ---
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -58,31 +52,26 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// --- AUTHENTICATION SHIELD ---
 const verifyAdmin = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
-        if (!authHeader) return res.status(401).json({ error: "Access Denied: No Token" });
-        
+        if (!authHeader) return res.status(401).json({ error: "No Token" });
         const token = authHeader.split(' ')[1];
         const { data: { user }, error } = await supabase.auth.getUser(token);
-        
         if (error || !user || user.email !== 'rex360solutions@gmail.com') {
-            return res.status(403).json({ error: "Unauthorized: Admin Required" });
+            return res.status(403).json({ error: "Unauthorized" });
         }
         req.user = user;
         next();
-    } catch (err) { res.status(401).json({ error: "Session Expired" }); }
+    } catch (err) { res.status(401).json({ error: "Expired" }); }
 };
 
-// --- TRANSACTIONAL FLOW (PAYSTACK) ---
-
+// --- ROUTES ---
 app.post('/api/payments/initialize', async (req, res) => {
     try {
         const { email, amount, serviceName } = req.body;
         const cleanAmount = String(amount).replace(/[^0-9]/g, '');
         const amountInKobo = parseInt(cleanAmount) * 100;
-
         const paystackRes = await axios.post('https://api.paystack.co/transaction/initialize', {
             email,
             amount: amountInKobo,
@@ -91,105 +80,68 @@ app.post('/api/payments/initialize', async (req, res) => {
         }, {
             headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` }
         });
-        
         res.json(paystackRes.data.data);
-    } catch (err) { 
-        console.error("[MONITOR]: Paystack Init Error", err.response?.data || err.message);
-        res.status(500).json({ error: "Financial Handshake Failed" }); 
-    }
+    } catch (err) { res.status(500).json({ error: "Payment Failed" }); }
 });
 
 app.post('/api/payments/webhook', async (req, res) => {
-    const hash = crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
-                       .update(JSON.stringify(req.body)).digest('hex');
-
+    const hash = crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY).update(JSON.stringify(req.body)).digest('hex');
     if (hash !== req.headers['x-paystack-signature']) return res.sendStatus(401);
-
     const event = req.body;
     if (event.event === 'charge.success') {
         const email = event.data.customer.email;
         const service = event.data.metadata.service_name;
         const ref = event.data.reference;
-
         const mailOptions = {
             from: '"REX360 COMPLIANCE" <rex360solutions@gmail.com>',
             to: email,
             subject: `Action Required: Formalize ${service}`,
-            html: `
-              <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 20px;">
-                <h2 style="color: #10b981;">Payment Verified</h2>
-                <p>Order Reference: <b>${ref}</b></p>
-                <p>We have successfully received payment for <b>${service}</b> registration.</p>
-                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-                <p>To begin the filing process, please submit your business details via our secure onboarding portal:</p>
-                <a href="https://rex360solutions.com/onboarding" style="background: #000; color: #fff; padding: 12px 25px; text-decoration: none; border-radius: 10px; display: inline-block; font-weight: bold;">Submit Business Details</a>
-                <p style="font-size: 12px; color: #999; margin-top: 30px;">REX360 SOLUTIONS LTD • Accredited CAC Agent</p>
-              </div>
-            `
+            html: `<div style="font-family: sans-serif; padding: 20px;"><h2>Verified</h2><p>Ref: ${ref}</p><p>Paid for <b>${service}</b>.</p><a href="https://rex360solutions.com/onboarding">Submit Details</a></div>`
         };
         await transporter.sendMail(mailOptions);
     }
     res.sendStatus(200);
 });
 
-// --- CONTENT ORCHESTRATION ---
-
-async function uploadToSupabase(file) {
-    const fileExt = file.originalname.split('.').pop();
-    const fileName = `${Date.now()}.${fileExt}`;
-    const { error } = await supabase.storage.from('uploads').upload(fileName, file.buffer, { 
-        contentType: file.mimetype,
-        cacheControl: '3600'
-    });
-    if (error) throw error;
-    return supabase.storage.from('uploads').getPublicUrl(fileName).data.publicUrl;
-}
-
 app.get('/api/slides', async (req, res) => {
-    const { data, error } = await supabase.from('slides').select('*').order('created_at', { ascending: true });
-    if (error) return res.status(500).json({ error: error.message });
+    const { data } = await supabase.from('slides').select('*').order('created_at', { ascending: true });
     res.json(data || []);
 });
 
 app.get('/api/posts', async (req, res) => {
-    const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+    const { data } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
     res.json(data || []);
 });
 
 app.get('/api/posts/:id', async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('posts').select('*').eq('id', req.params.id).single();
-        if (error || !data) return res.status(404).json({ error: "Resource Not Found" });
-        res.json(data);
-    } catch (err) { res.status(500).json({ error: "Query Collision" }); }
+    const { data } = await supabase.from('posts').select('*').eq('id', req.params.id).single();
+    res.json(data);
 });
 
 app.get('/api/services', async (req, res) => {
-    const { data, error } = await supabase.from('services').select('*').order('id', { ascending: true });
-    if (error) return res.status(500).json({ error: error.message });
+    const { data } = await supabase.from('services').select('*').order('id', { ascending: true });
     res.json(data || []);
 });
 
 app.post('/api/posts', verifyAdmin, upload.single('media'), async (req, res) => {
     try {
-        const url = req.file ? await uploadToSupabase(req.file) : null;
-        const postData = { ...req.body, media_url: url, media_type: req.file?.mimetype.startsWith('video') ? 'video' : 'image' };
-        const { data, error } = await supabase.from('posts').insert([postData]).select();
-        if (error) throw error;
+        const file = req.file;
+        const fileName = `${Date.now()}.${file.originalname.split('.').pop()}`;
+        await supabase.storage.from('uploads').upload(fileName, file.buffer, { contentType: file.mimetype });
+        const url = supabase.storage.from('uploads').getPublicUrl(fileName).data.publicUrl;
+        const postData = { ...req.body, media_url: url, media_type: file.mimetype.startsWith('video') ? 'video' : 'image' };
+        const { data } = await supabase.from('posts').insert([postData]).select();
         res.status(201).json(data[0]);
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/services/:id', verifyAdmin, async (req, res) => {
-    const { error } = await supabase.from('services').update(req.body).eq('id', req.params.id);
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ message: "Financial Node Updated" });
+    await supabase.from('services').update(req.body).eq('id', req.params.id);
+    res.json({ message: "Updated" });
 });
 
 app.get('/', (req, res) => res.json({ status: "Architect Engine Online" }));
 
-app.use((req, res) => res.status(404).json({ error: "API Route Unavailable" }));
-
-app.listen(PORT, () => console.log(`[MONITOR]: System running on Port ${PORT}`));
+// --- VERCEL EXPORT ---
+// CRITICAL: Vercel needs the app exported to handle it as a serverless function
 module.exports = app;
