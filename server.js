@@ -10,24 +10,35 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// --- PRO-MEASURE: STRICT CORS & SECURITY ---
+// --- PRO-MEASURE: DYNAMIC CORS ARCHITECTURE ---
+// This list covers every possible way a user hits your site
 const allowedOrigins = [
   'https://rex360solutions.com',
   'https://www.rex360solutions.com',
-  'http://localhost:3000'
+  'https://rex360-frontend.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5173'
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
       callback(null, true);
     } else {
-      callback(new Error('CORS Policy Violation: Origin Unauthorized'));
+      console.error(`[CORS REJECTED]: ${origin}`);
+      callback(new Error('CORS Policy Violation'));
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  credentials: true
 }));
+
+// Handle Preflight OPTIONS requests globally
+app.options('*', cors());
 
 app.use(express.json());
 
@@ -35,7 +46,7 @@ app.use(express.json());
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB Strictly Enforced
+  limits: { fileSize: 50 * 1024 * 1024 } 
 });
 
 // --- ELITE EMAIL AUTOMATION ---
@@ -57,7 +68,7 @@ const verifyAdmin = async (req, res, next) => {
         const { data: { user }, error } = await supabase.auth.getUser(token);
         
         if (error || !user || user.email !== 'rex360solutions@gmail.com') {
-            return res.status(403).json({ error: "Unauthorized: Admin Privileges Required" });
+            return res.status(403).json({ error: "Unauthorized: Admin Required" });
         }
         req.user = user;
         next();
@@ -69,19 +80,14 @@ const verifyAdmin = async (req, res, next) => {
 app.post('/api/payments/initialize', async (req, res) => {
     try {
         const { email, amount, serviceName } = req.body;
-        // Clean price string and convert to Kobo precisely
         const cleanAmount = String(amount).replace(/[^0-9]/g, '');
         const amountInKobo = parseInt(cleanAmount) * 100;
 
         const paystackRes = await axios.post('https://api.paystack.co/transaction/initialize', {
             email,
             amount: amountInKobo,
-            // Strictly connected to your primary domain
             callback_url: "https://rex360solutions.com/payment-success",
-            metadata: { 
-                service_name: serviceName,
-                custom_fields: [{ display_name: "Service", variable_name: "service", value: serviceName }]
-            }
+            metadata: { service_name: serviceName }
         }, {
             headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` }
         });
@@ -139,14 +145,18 @@ async function uploadToSupabase(file) {
     return supabase.storage.from('uploads').getPublicUrl(fileName).data.publicUrl;
 }
 
-// Global Retrieval Node
+app.get('/api/slides', async (req, res) => {
+    const { data, error } = await supabase.from('slides').select('*').order('created_at', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+});
+
 app.get('/api/posts', async (req, res) => {
     const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json(data || []);
 });
 
-// Single Article Retrieval Node (Crucial for PostDetails)
 app.get('/api/posts/:id', async (req, res) => {
     try {
         const { data, error } = await supabase.from('posts').select('*').eq('id', req.params.id).single();
@@ -155,14 +165,16 @@ app.get('/api/posts/:id', async (req, res) => {
     } catch (err) { res.status(500).json({ error: "Query Collision" }); }
 });
 
+app.get('/api/services', async (req, res) => {
+    const { data, error } = await supabase.from('services').select('*').order('id', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+});
+
 app.post('/api/posts', verifyAdmin, upload.single('media'), async (req, res) => {
     try {
         const url = req.file ? await uploadToSupabase(req.file) : null;
-        const postData = {
-            ...req.body,
-            media_url: url,
-            media_type: req.file?.mimetype.startsWith('video') ? 'video' : 'image'
-        };
+        const postData = { ...req.body, media_url: url, media_type: req.file?.mimetype.startsWith('video') ? 'video' : 'image' };
         const { data, error } = await supabase.from('posts').insert([postData]).select();
         if (error) throw error;
         res.status(201).json(data[0]);
@@ -170,15 +182,13 @@ app.post('/api/posts', verifyAdmin, upload.single('media'), async (req, res) => 
 });
 
 app.put('/api/services/:id', verifyAdmin, async (req, res) => {
-    const { data, error } = await supabase.from('services').update(req.body).eq('id', req.params.id);
+    const { error } = await supabase.from('services').update(req.body).eq('id', req.params.id);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ message: "Financial Node Updated" });
 });
 
-// Health Monitoring
-app.get('/', (req, res) => res.json({ status: "Architect Engine Online", domain: "rex360solutions.com" }));
+app.get('/', (req, res) => res.json({ status: "Architect Engine Online" }));
 
-// 404 Fallback
 app.use((req, res) => res.status(404).json({ error: "API Route Unavailable" }));
 
 app.listen(PORT, () => console.log(`[MONITOR]: System running on Port ${PORT}`));
