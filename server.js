@@ -8,36 +8,37 @@ const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 
-// --- 1. ARCHITECTURAL CORS (GATEKEEPER) ---
+// --- 1. GATEKEEPER: ARCHITECTURAL CORS ---
 const allowedOrigins = [
-  'https://rex360solutions.com',
-  'https://www.rex360solutions.com',
-  'https://rex360-frontend.vercel.app',
-  'http://localhost:5173',
-  'http://localhost:3000'
+  'https://rex360solutions.com',        // Your new domain
+  'https://www.rex360solutions.com',    // The 'www' version
+  'https://rex360-frontend.vercel.app', // Your Vercel preview link
+  'http://localhost:5173'               // Your local development machine
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
+    // If the origin is in our list, or if it's a local request (no origin), let it through
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(new Error('CORS Policy Violation: Origin Unauthorized'));
+      console.log("Blocked by CORS:", origin);
+      callback(new Error('Not allowed by CORS'));
     }
   },
+  credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-  credentials: true
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-app.options('*', cors());
 app.use(express.json());
 
 // --- 2. INFRASTRUCTURE SETUP ---
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 } 
+  limits: { fileSize: 15 * 1024 * 1024 } // Expanded to 15MB for Video support
 });
 
 const transporter = nodemailer.createTransport({
@@ -48,17 +49,7 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// --- 3. SECURITY & LOGGING MIDDLEWARE ---
-const logAction = async (email, action, details) => {
-    try {
-        await supabase.from('audit_logs').insert([{
-            admin_email: email,
-            action_type: action,
-            details: details
-        }]);
-    } catch (err) { console.error("[AUDIT ERROR]:", err); }
-};
-
+// --- 3. SECURITY & AUDIT MIDDLEWARE ---
 const verifyAdmin = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
@@ -66,143 +57,148 @@ const verifyAdmin = async (req, res, next) => {
         const token = authHeader.split(' ')[1];
         const { data: { user }, error } = await supabase.auth.getUser(token);
         if (error || !user || user.email !== 'rex360solutions@gmail.com') {
-            return res.status(403).json({ error: "Unauthorized" });
+            return res.status(403).json({ error: "Unauthorized Node Access" });
         }
         req.user = user;
         next();
     } catch (err) { res.status(401).json({ error: "Session Expired" }); }
 };
 
-// --- 4. DATA ROUTES ---
-
-app.get('/api/posts', async (req, res) => {
+const logAction = async (email, action, details) => {
     try {
-        const { data, error } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
+        await supabase.from('audit_logs').insert([{
+            admin_email: email,
+            action_type: action,
+            details: details
+        }]);
+    } catch (err) { console.error("Audit node failure", err); }
+};
+
+// --- 4. ASSET MANAGEMENT (KINETIC SLIDES & MEDIA) ---
+
+app.post('/api/admin/upload', verifyAdmin, upload.single('media'), async (req, res) => {
+    try {
+        const file = req.file;
+        const fileName = `agency/${Date.now()}-${file.originalname}`;
+        
+        const { data, error } = await supabase.storage
+            .from('assets') 
+            .upload(fileName, file.buffer, { contentType: file.mimetype, cacheControl: '3600' });
+
         if (error) throw error;
-        res.json(data || []);
-    } catch (err) { res.status(500).json({ error: "Post Fetch Failed" }); }
+
+        const { data: { publicUrl } } = supabase.storage
+            .from('assets')
+            .getPublicUrl(fileName);
+
+        res.json({ url: publicUrl, type: file.mimetype.startsWith('video') ? 'video' : 'image' });
+    } catch (err) { res.status(500).json({ error: "Cloud Media Sync Failed" }); }
 });
 
+// GET: Kinetic Slides for Home Flow
+app.get('/api/slides', async (req, res) => {
+    const { data } = await supabase.from('slides').select('*').order('created_at', { ascending: true });
+    res.json(data || []);
+});
+
+// POST: Add new cinematic slide with text parts
+app.post('/api/slides', verifyAdmin, async (req, res) => {
+    const { title_part_1, title_part_2, subtitle, media_url, media_type, label } = req.body;
+    const { data, error } = await supabase.from('slides').insert([{ 
+        title_part_1, title_part_2, subtitle, media_url, media_type, label 
+    }]).select();
+    
+    if (error) return res.status(500).json(error);
+    await logAction(req.user.email, 'SLIDE_ADD', `Added kinetic slide: ${title_part_1}`);
+    res.json(data[0]);
+});
+
+// AGENT IDENTITY: For the morphing "About" blob
+app.get('/api/agent-profile', async (req, res) => {
+    const { data } = await supabase.from('agent_profile').select('*').single();
+    res.json(data || {});
+});
+
+app.put('/api/agent-profile', verifyAdmin, async (req, res) => {
+    const { profile_url, bio } = req.body;
+    const { data, error } = await supabase.from('agent_profile').upsert({ id: 1, profile_url, bio }).select();
+    if (error) return res.status(500).json(error);
+    await logAction(req.user.email, 'PROFILE_SYNC', 'Updated agency identity photo');
+    res.json(data[0]);
+});
+
+// --- 5. REGISTRY & MATURE SERVICE SYNC ---
+
+// GET: 7 Separate Service Nodes
 app.get('/api/services', async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('services').select('*').order('id', { ascending: true });
-        if (error) throw error;
-        res.json(data || []);
-    } catch (err) { res.status(500).json({ error: "Service Fetch Failed" }); }
+    const { data } = await supabase.from('services').select('*').order('id', { ascending: true });
+    res.json(data || []);
 });
 
-// Update Service Pricing (Admin Only)
-app.put('/api/services/:id', verifyAdmin, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { price, original_price } = req.body;
-        const { data, error } = await supabase.from('services').update({ price, original_price }).eq('id', id).select();
-        if (error) throw error;
-        await logAction(req.user.email, 'PRICE_UPDATE', `Service ${id} updated to ₦${price}`);
-        res.json(data[0]);
-    } catch (err) { res.status(500).json({ error: "Update Failed" }); }
-});
-
-// --- 5. FILING & STATUS ENGINE ---
-
-// Get all applications (Admin Only)
 app.get('/api/applications', verifyAdmin, async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('applications').select('*').order('created_at', { ascending: false });
-        if (error) throw error;
-        res.json(data || []);
-    } catch (err) { res.status(500).json({ error: "Registry Query Failed" }); }
+    const { data } = await supabase.from('applications').select('*').order('created_at', { ascending: false });
+    res.json(data || []);
 });
 
-// Insert new application (Client Post-Payment)
-app.post('/api/applications', async (req, res) => {
-    try {
-        const formData = req.body;
-        const { data, error } = await supabase.from('applications').insert([formData]).select();
-        if (error) throw error;
-
-        await transporter.sendMail({
-            from: '"REX360 ENGINE" <rex360solutions@gmail.com>',
-            to: 'rex360solutions@gmail.com',
-            subject: '🚨 NEW FILING: ' + (formData.business_name_1 || 'New Business'),
-            html: `<h3>New Application Received</h3><p>Director: ${formData.director_name || 'N/A'}</p>`
-        });
-        res.status(201).json({ success: true, data: data[0] });
-    } catch (err) { res.status(500).json({ error: "Filing Node Failure" }); }
-});
-
-// Update Application Status & Notify Client
+// Update Workflow Status & Trigger Email Node
 app.put('/api/applications/:id/status', verifyAdmin, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { status, email, businessName } = req.body;
+    const { id } = req.params;
+    const { status, email, businessName } = req.body;
 
-        const { data, error } = await supabase.from('applications').update({ status }).eq('id', id).select();
-        if (error) throw error;
+    const { data, error } = await supabase.from('applications').update({ status }).eq('id', id).select();
+    
+    if (status === 'completed' && !error) {
+        await transporter.sendMail({
+            from: '"REX360 SOLUTIONS" <rex360solutions@gmail.com>',
+            to: email,
+            subject: `✅ Registration Certified: ${businessName}`,
+            html: `<div style="font-family:sans-serif; padding:20px; border:1px solid #eee;">
+                    <h2 style="color:#10b981;">Certification Complete</h2>
+                    <p>Your entity <b>${businessName}</b> has been successfully registered.</p>
+                    <p>Login to your portal to download certificates.</p>
+                   </div>`
+        });
+    }
 
-        if (status === 'completed') {
-            await transporter.sendMail({
-                from: '"REX360 SOLUTIONS" <rex360solutions@gmail.com>',
-                to: email,
-                subject: `✅ Registration Complete: ${businessName}`,
-                html: `<div style="font-family:sans-serif;"><h2>Filing Successful!</h2><p>Your business <b>${businessName}</b> is now registered with the CAC.</p></div>`
-            });
-        }
-        await logAction(req.user.email, 'STATUS_CHANGE', `${businessName} set to ${status}`);
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: "Status Update Failed" }); }
+    await logAction(req.user.email, 'STATUS_UPDATE', `${businessName} moved to ${status}`);
+    res.json({ success: true, data: data[0] });
 });
 
-// --- 6. PAYMENTS (PAYSTACK) ---
+// --- 6. FINANCIALS (PAYSTACK & AUDIT) ---
+
+app.put('/api/services/:id', verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { price, description } = req.body;
+    const { data, error } = await supabase.from('services').update({ price, description }).eq('id', id).select();
+    if (error) return res.status(500).json(error);
+    await logAction(req.user.email, 'FINANCIAL_MOD', `Service ${id} updated to ₦${price}`);
+    res.json(data[0]);
+});
 
 app.post('/api/payments/initialize', async (req, res) => {
     try {
-        const { email, amount, serviceName } = req.body;
+        const { email, amount, serviceName, metadata } = req.body;
         const amountInKobo = parseInt(String(amount).replace(/\D/g, '')) * 100;
+        
         const paystackRes = await axios.post('https://api.paystack.co/transaction/initialize', {
             email, amount: amountInKobo,
             callback_url: "https://rex360solutions.com/payment-success",
-            metadata: { service_name: serviceName }
+            metadata: { ...metadata, service_name: serviceName }
         }, {
             headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` }
         });
         res.json(paystackRes.data.data);
-    } catch (err) { res.status(500).json({ error: "Payment Node Offline" }); }
+    } catch (err) { res.status(500).json({ error: "Payment node offline" }); }
 });
 
-// --- 7. ADMIN ASSETS ---
-app.post('/api/admin/upload', verifyAdmin, upload.single('media'), async (req, res) => {
-    try {
-        const file = req.file;
-        const fileName = `assets/${Date.now()}-${file.originalname}`;
-        const { error } = await supabase.storage.from('assets').upload(fileName, file.buffer, { contentType: file.mimetype });
-        if (error) throw error;
-        const url = supabase.storage.from('assets').getPublicUrl(fileName).data.publicUrl;
-        res.json({ url });
-    } catch (err) { res.status(500).json({ error: "Upload Failed" }); }
+app.get('/api/logs', verifyAdmin, async (req, res) => {
+    const { data } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false });
+    res.json(data || []);
 });
 
-// --- 8. SYSTEM HEALTH ---
-app.get('/api/health', (req, res) => res.json({ status: "Vercel Architect Online", timestamp: new Date() }));
+// --- VERCEL EXPORT ---
 module.exports = app;
 
 if (process.env.NODE_ENV !== 'production') {
-    app.listen(5000, () => console.log(`[TERMINATOR]: Engine Online at 5000`));
+    app.listen(5000, () => console.log('REX360 Engine operational on port 5000'));
 }
-// TRACKING ENGINE: Find application by Email or Payment Reference
-app.get('/api/track', async (req, res) => {
-    try {
-        const { query } = req.query;
-        const { data, error } = await supabase
-            .from('applications')
-            .select('*')
-            // This searches both the email and payment_ref columns
-            .or(`email.eq.${query},payment_ref.eq.${query}`)
-            .single();
-
-        if (error || !data) return res.status(404).json({ error: "No filing found" });
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: "Registry Sync Error" });
-    }
-});
