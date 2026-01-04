@@ -303,13 +303,24 @@ app.post('/api/content', verifyAdmin, async (req, res) => {
     res.json(data[0]);
 });
 
-// DELETE: Remove content asset
-app.delete('/api/content/:id', verifyAdmin, async (req, res) => {
-    const { id } = req.params;
-    const { error } = await supabase.from('content_assets').delete().eq('id', id);
-    if (error) return res.status(500).json(error);
-    await logAction(req.user.email, 'CONTENT_DELETE', `Removed asset ${id}`);
-    res.json({ success: true });
+/// 1. DELETE ASSET (Image/Video)
+app.delete('/api/slides/:id', async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase.from('slides').delete().eq('id', id);
+  if (error) return res.status(400).json(error);
+  res.status(200).json({ message: "Asset Purged" });
+});
+
+// 2. UPDATE SERVICE (Title/Price/Description)
+app.put('/api/services/:id', async (req, res) => {
+  const { id } = req.params;
+  const { title, price, description } = req.body;
+  const { data, error } = await supabase
+    .from('services')
+    .update({ title, price, description })
+    .eq('id', id);
+  if (error) return res.status(400).json(error);
+  res.status(200).json(data);
 });
 
 // --- VERCEL EXPORT ---
