@@ -183,6 +183,21 @@ app.put('/api/applications/:id/status', verifyAdmin, async (req, res) => {
     res.json({ success: true, data: data[0] });
 });
 
+// Express Pacing Toggle for Tracking
+app.put('/api/applications/:id/express', verifyAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { isExpress } = req.body;
+
+  const { data, error } = await supabase
+    .from('applications')
+    .update({ is_express: isExpress })
+    .eq('id', id);
+
+  if (error) return res.status(400).json(error);
+  await logAction(req.user.email, 'EXPRESS_TOGGLE', `Express mode ${isExpress ? 'enabled' : 'disabled'} for application ${id}`);
+  res.json({ message: "Speed protocol updated", data });
+});
+
 // --- 6. FINANCIALS (PAYSTACK & AUDIT) ---
 
 app.put('/api/services/:id', verifyAdmin, async (req, res) => {
