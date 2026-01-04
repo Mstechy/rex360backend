@@ -12,7 +12,11 @@ const app = express();
 const allowedOrigins = [
   'http://localhost:5173', // Local development
   'https://rex360frontend.vercel.app', // Your actual Vercel Frontend URL
-  /\.vercel\.app$/ // This allows ANY vercel sub-domain (Recommended)
+  'https://rex360-solutions.vercel.app', // Frontend deployment URL
+  'https://rex360-solutions-1.vercel.app', // Alternative deployment URL
+  'https://rex360-solutions-2.vercel.app', // Another alternative
+  /\.vercel\.app$/, // This allows ANY vercel sub-domain (Recommended)
+  'https://rex360backend.vercel.app' // Allow backend to backend calls
 ];
 
 const corsOptions = {
@@ -54,7 +58,9 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // --- 2. INFRASTRUCTURE SETUP ---
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_KEY
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
+  : null;
 
 const upload = multer({ 
   storage: multer.memoryStorage(),
@@ -127,6 +133,7 @@ app.post('/api/admin/upload', verifyAdmin, upload.single('media'), async (req, r
 
 // GET: Kinetic Slides for Home Flow
 app.get('/api/slides', async (req, res) => {
+    if (!supabase) return res.json([]);
     const { data } = await supabase.from('slides').select('*').order('created_at', { ascending: true });
     res.json(data || []);
 });
@@ -154,6 +161,7 @@ app.delete('/api/slides/:id', verifyAdmin, async (req, res) => {
 
 // AGENT IDENTITY: For the morphing "About" blob
 app.get('/api/agent-profile', async (req, res) => {
+    if (!supabase) return res.json({});
     const { data } = await supabase.from('agent_profile').select('*').single();
     res.json(data || {});
 });
@@ -170,6 +178,7 @@ app.put('/api/agent-profile', verifyAdmin, async (req, res) => {
 
 // GET: 7 Separate Service Nodes
 app.get('/api/services', async (req, res) => {
+    if (!supabase) return res.json([]);
     const { data } = await supabase.from('services').select('*').order('id', { ascending: true });
     res.json(data || []);
 });
@@ -253,15 +262,19 @@ app.get('/api/logs', verifyAdmin, async (req, res) => {
 // --- 7. NEWS MANAGEMENT ---
 
 // Intelligence Hub: Official News Briefings
-app.get('/api/posts', (req, res) => {
-  res.json([
-    {
-      id: 1,
-      title: "New CAC Name Substitution Policy",
-      excerpt: "Understanding legal requirements for name changes in 2026.",
-      date: "Jan 04, 2026"
-    }
-  ]);
+app.get('/api/posts', async (req, res) => {
+  if (!supabase) return res.json([]);
+  const { data } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
+  res.json(data || []);
+});
+
+// GET: Single news post by ID
+app.get('/api/posts/:id', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: "Database unavailable" });
+  const { id } = req.params;
+  const { data, error } = await supabase.from('posts').select('*').eq('id', id).single();
+  if (error) return res.status(404).json({ error: "Post not found" });
+  res.json(data);
 });
 
 // POST: Create new news post
@@ -329,3 +342,11 @@ app.delete('/api/content/:id', verifyAdmin, async (req, res) => {
 
 // --- VERCEL EXPORT ---
 module.exports = app;
+
+// --- LOCAL DEVELOPMENT SERVER ---
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
