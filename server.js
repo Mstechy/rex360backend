@@ -10,10 +10,10 @@ const app = express();
 
 // --- 1. GATEKEEPER: ARCHITECTURAL CORS ---
 const allowedOrigins = [
-  'https://rex360solutions.com',        // Your new domain
-  'https://www.rex360solutions.com',    // The 'www' version
-  'https://rex360-frontend.vercel.app', // Your Vercel preview link
-  'http://localhost:5173'               // Your local development machine
+         // Your new domain
+  'https://www.rex360solutions.com',    // The 'www' version // Your Vercel preview link
+    // Alternative Vercel URL
+  'http://localhost:5173',              // Your local development machine              // Alternative local port
 ];
 
 app.use(cors({
@@ -74,6 +74,16 @@ const logAction = async (email, action, details) => {
     } catch (err) { console.error("Audit node failure", err); }
 };
 
+// --- 4. CREDENTIALS & ACCREDITATIONS ---
+
+// Verification Vault: Placeholders for your official certificates
+app.get('/api/credentials', (req, res) => {
+  res.json([
+    { id: 1, title: 'CAC ACCREDITATION', code: 'RC-142280', icon: 'Award' },
+    { id: 2, title: 'NEPC EXPORTER', code: 'NP-55092', icon: 'Globe' }
+  ]);
+});
+
 // --- 4. ASSET MANAGEMENT (KINETIC SLIDES & MEDIA) ---
 
 app.post('/api/admin/upload', verifyAdmin, upload.single('media'), async (req, res) => {
@@ -104,13 +114,22 @@ app.get('/api/slides', async (req, res) => {
 // POST: Add new cinematic slide with text parts
 app.post('/api/slides', verifyAdmin, async (req, res) => {
     const { title_part_1, title_part_2, subtitle, media_url, media_type, label } = req.body;
-    const { data, error } = await supabase.from('slides').insert([{ 
-        title_part_1, title_part_2, subtitle, media_url, media_type, label 
+    const { data, error } = await supabase.from('slides').insert([{
+        title_part_1, title_part_2, subtitle, media_url, media_type, label
     }]).select();
-    
+
     if (error) return res.status(500).json(error);
     await logAction(req.user.email, 'SLIDE_ADD', `Added kinetic slide: ${title_part_1}`);
     res.json(data[0]);
+});
+
+// DELETE: Remove slide
+app.delete('/api/slides/:id', verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabase.from('slides').delete().eq('id', id);
+    if (error) return res.status(500).json(error);
+    await logAction(req.user.email, 'SLIDE_DELETE', `Removed slide ${id}`);
+    res.json({ success: true });
 });
 
 // AGENT IDENTITY: For the morphing "About" blob
@@ -194,6 +213,83 @@ app.post('/api/payments/initialize', async (req, res) => {
 app.get('/api/logs', verifyAdmin, async (req, res) => {
     const { data } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false });
     res.json(data || []);
+});
+
+// --- 7. NEWS MANAGEMENT ---
+
+// Intelligence Hub: Official News Briefings
+app.get('/api/posts', (req, res) => {
+  res.json([
+    {
+      id: 1,
+      title: "New CAC Name Substitution Policy",
+      excerpt: "Understanding legal requirements for name changes in 2026.",
+      date: "Jan 04, 2026"
+    }
+  ]);
+});
+
+// POST: Create new news post
+app.post('/api/posts', verifyAdmin, async (req, res) => {
+    const { title, content, category, media_url, media_type } = req.body;
+    const { data, error } = await supabase.from('posts').insert([{
+        title, content, category, media_url, media_type
+    }]).select();
+
+    if (error) return res.status(500).json(error);
+    await logAction(req.user.email, 'POST_ADD', `Published news: ${title}`);
+    res.json(data[0]);
+});
+
+// PUT: Update news post
+app.put('/api/posts/:id', verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { title, content, category, media_url, media_type } = req.body;
+    const { data, error } = await supabase.from('posts').update({
+        title, content, category, media_url, media_type
+    }).eq('id', id).select();
+
+    if (error) return res.status(500).json(error);
+    await logAction(req.user.email, 'POST_UPDATE', `Updated post: ${title}`);
+    res.json(data[0]);
+});
+
+// DELETE: Remove news post
+app.delete('/api/posts/:id', verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabase.from('posts').delete().eq('id', id);
+    if (error) return res.status(500).json(error);
+    await logAction(req.user.email, 'POST_DELETE', `Removed post ${id}`);
+    res.json({ success: true });
+});
+
+// --- 8. CONTENT MANAGEMENT ---
+
+// GET: Content assets
+app.get('/api/content', verifyAdmin, async (req, res) => {
+    const { data } = await supabase.from('content_assets').select('*').order('created_at', { ascending: false });
+    res.json(data || []);
+});
+
+// POST: Upload content asset
+app.post('/api/content', verifyAdmin, async (req, res) => {
+    const { name, type, url, category } = req.body;
+    const { data, error } = await supabase.from('content_assets').insert([{
+        name, type, url, category
+    }]).select();
+
+    if (error) return res.status(500).json(error);
+    await logAction(req.user.email, 'CONTENT_ADD', `Added ${type} asset: ${name}`);
+    res.json(data[0]);
+});
+
+// DELETE: Remove content asset
+app.delete('/api/content/:id', verifyAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabase.from('content_assets').delete().eq('id', id);
+    if (error) return res.status(500).json(error);
+    await logAction(req.user.email, 'CONTENT_DELETE', `Removed asset ${id}`);
+    res.json({ success: true });
 });
 
 // --- VERCEL EXPORT ---
