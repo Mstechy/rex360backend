@@ -8,52 +8,24 @@ const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 
-// --- 1. GATEKEEPER: ARCHITECTURAL CORS ---
+// --- 1. THE CORS GATEKEEPER ---
 const allowedOrigins = [
-  'http://localhost:5173', // Local development
-  'https://rex360frontend.vercel.app', // Your actual Vercel Frontend URL
-  'https://rex360-solutions.vercel.app', // Frontend deployment URL
-  'https://rex360-solutions-1.vercel.app', // Alternative deployment URL
-  'https://rex360-solutions-2.vercel.app', // Another alternative
-  /\.vercel\.app$/, // This allows ANY vercel sub-domain (Recommended)
-  'https://rex360backend.vercel.app' // Allow backend to backend calls
+  'http://localhost:5173', // Local Development
+  'https://rex360solutions.com', // Your Live Domain
+  'https://rex360frontend.vercel.app' // Vercel Preview
 ];
 
-const corsOptions = {
+app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-
-    const isAllowed = allowedOrigins.some((allowed) => {
-      if (allowed instanceof RegExp) return allowed.test(origin);
-      return allowed === origin;
-    });
-
-    if (isAllowed) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
-  optionsSuccessStatus: 200
-};
-
-app.use(cors(corsOptions));
-
-// Handle OPTIONS preflight requests
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  // Handle Preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
 
 app.use(express.json());
 
