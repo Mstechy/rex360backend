@@ -10,26 +10,46 @@ const app = express();
 
 // --- 1. GATEKEEPER: ARCHITECTURAL CORS ---
 const allowedOrigins = [
-         // Your new domain
-  'https://www.rex360solutions.com',    // The 'www' version // Your Vercel preview link
-    // Alternative Vercel URL
-  'http://localhost:5173',              // Your local development machine              // Alternative local port
+  'http://localhost:5173', // Local development
+  'https://rex360frontend.vercel.app', // Your actual Vercel Frontend URL
+  /\.vercel\.app$/ // This allows ANY vercel sub-domain (Recommended)
 ];
 
-app.use(cors({
+const corsOptions = {
   origin: function (origin, callback) {
-    // If the origin is in our list, or if it's a local request (no origin), let it through
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    const isAllowed = allowedOrigins.some((allowed) => {
+      if (allowed instanceof RegExp) return allowed.test(origin);
+      return allowed === origin;
+    });
+
+    if (isAllowed) {
       callback(null, true);
     } else {
-      console.log("Blocked by CORS:", origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+
+// Handle OPTIONS preflight requests
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  // Handle Preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
 
 app.use(express.json());
 
