@@ -329,7 +329,3 @@ app.delete('/api/content/:id', verifyAdmin, async (req, res) => {
 
 // --- VERCEL EXPORT ---
 module.exports = app;
-
-if (process.env.NODE_ENV !== 'production') {
-    app.listen(5000, () => console.log('REX360 Engine operational on port 5000'));
-}
